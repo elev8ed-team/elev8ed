@@ -1,11 +1,11 @@
 "use client"
 
-import React, { useMemo, useState } from 'react'
+import React, { Suspense, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '../../../lib/supabase'
 
-export default function SignupPage() {
+function SignupForm() {
   const searchParams = useSearchParams()
   const invitationToken = useMemo(() => searchParams.get('token'), [searchParams])
 
@@ -172,5 +172,13 @@ export default function SignupPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-xs text-muted-foreground">Loading signup form...</div>}>
+      <SignupForm />
+    </Suspense>
   )
 }

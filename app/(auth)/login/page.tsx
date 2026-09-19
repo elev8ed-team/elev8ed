@@ -25,8 +25,8 @@ export default function LoginPage() {
       setErrorMessage(error.message)
       setIsLoading(false)
     } else {
-      // Directs authenticated core core/members straight to the onboarding hub
-      window.location.href = '/onboarding'
+      // Directs authenticated core/members straight to their active dashboard workspace
+      window.location.href = '/dashboard'
     }
   }
 
