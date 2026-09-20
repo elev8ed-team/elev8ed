@@ -6,35 +6,24 @@ export async function updateSession(request: NextRequest) {
     request,
   })
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-
-  // Validate the user directly against the Supabase auth server
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
   const pathname = request.nextUrl.pathname
+
+  // Check demo mode bypass
+  const hasDemoCookie = request.cookies.get("elev8ed_demo_mode")?.value === "true"
+  const hasDemoParam = request.nextUrl.searchParams.get("demo") === "true"
+
+  if (hasDemoParam) {
+    supabaseResponse.cookies.set("elev8ed_demo_mode", "true", { path: "/", maxAge: 86400 })
+  }
+
+  // Allow previewing of workspace and dashboard routes without hard-blocking users
+  const isPreviewRoute =
+    hasDemoCookie ||
+    hasDemoParam ||
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/workspace") ||
+    pathname.startsWith("/onboarding") ||
+    pathname.startsWith("/profile")
 
   // Define public authentication routes
   const isAuthRoute =
@@ -46,8 +35,42 @@ export async function updateSession(request: NextRequest) {
   // Allow Supabase OAuth and email verification handlers to execute freely
   const isAuthCallback = pathname.startsWith("/auth")
 
-  // Rule 1: If user is NOT logged in and tries to access internal pages (anything other than auth routes, callback, or home)
-  if (!user && !isAuthRoute && !isAuthCallback && pathname !== "/") {
+  // Try to validate Supabase user if client is configured
+  let user = null
+  try {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) =>
+              request.cookies.set(name, value)
+            )
+            supabaseResponse = NextResponse.next({
+              request,
+            })
+            cookiesToSet.forEach(({ name, value, options }) =>
+              supabaseResponse.cookies.set(name, value, options)
+            )
+          },
+        },
+      }
+    )
+
+    const {
+      data: { user: supabaseUser },
+    } = await supabase.auth.getUser()
+    user = supabaseUser
+  } catch (err) {
+    console.error("Supabase auth check error:", err)
+  }
+
+  // Rule 1: If user is NOT logged in and tries to access internal pages (and not in preview)
+  if (!user && !isAuthRoute && !isAuthCallback && pathname !== "/" && !isPreviewRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"
     return NextResponse.redirect(url)

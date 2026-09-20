@@ -42,7 +42,36 @@ export default function WorkspaceGatewayPage() {
       const { data: { user } } = await supabase.auth.getUser()
 
       if (!user) {
-        window.location.href = '/login'
+        // Automatically default to the current academic cycle (e.g., "2026-2027")
+        const currentYear = new Date().getFullYear()
+        setTenureYear(`${currentYear}-${currentYear + 1}`)
+
+        // Provide demo workspaces fallback so visitors can preview immediately
+        setMemberships([
+          {
+            id: 'demo-1',
+            role: 'super_core',
+            status: 'active',
+            workspaces: {
+              id: 'demo-ws-acm',
+              name: 'ACM Student Chapter',
+              slug: 'acm-student-chapter',
+              owner_id: 'demo-admin'
+            }
+          },
+          {
+            id: 'demo-2',
+            role: 'department_head',
+            status: 'active',
+            workspaces: {
+              id: 'demo-ws-cultural',
+              name: 'Cultural & Arts Council',
+              slug: 'cultural-arts-council',
+              owner_id: 'demo-admin'
+            }
+          }
+        ])
+        setIsLoading(false)
         return
       }
 
@@ -138,7 +167,13 @@ export default function WorkspaceGatewayPage() {
     setErrorMessage(null)
 
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) {
+      // Demo preview mode fallback: simulate instant creation and launch dashboard
+      setTimeout(() => {
+        window.location.href = `/dashboard?ws=${slug}`
+      }, 500)
+      return
+    }
 
     // Combine into a clean display name: e.g., "IITB — Sports Committee"
     const fullName = `${parentOrg.trim()} — ${clubName.trim()}`
