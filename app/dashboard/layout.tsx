@@ -1,21 +1,18 @@
 "use client"
 
 import React, { Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { Logo } from '../../components/Logo'
 
 function IconRailContent() {
-  const searchParams = useSearchParams()
-  const currentSlug = searchParams.get('ws') || ''
-
   return (
     <aside className="w-16 border-r border-zinc-800/80 bg-zinc-950 flex flex-col justify-between items-center py-6 shrink-0 z-10">
       {/* Top Navigation Icons */}
       <div className="flex flex-col items-center space-y-6">
         {/* Brand Icon */}
-        <a href="/workspace" className="flex items-center justify-center text-white hover:text-zinc-300 transition-colors">
+        <Link href="/workspace" className="flex items-center justify-center text-white hover:text-zinc-300 transition-colors">
             <Logo className="w-10 h-10" />
-        </a>
+        </Link>
 
         <div className="h-px w-6 bg-zinc-800" />
 
@@ -44,13 +41,13 @@ function IconRailContent() {
 
       {/* Bottom Utility Icons */}
       <div className="flex flex-col items-center space-y-4">
-        <a
+        <Link
           href="/workspace"
           title="Switch Workspace"
           className="h-9 w-9 rounded-lg border border-zinc-800 bg-zinc-900/50 flex items-center justify-center text-xs font-mono text-zinc-400 hover:text-white hover:border-zinc-600 transition-colors"
         >
           WS
-        </a>
+        </Link>
         <a
           href="/auth/signout"
           title="Sign Out"
