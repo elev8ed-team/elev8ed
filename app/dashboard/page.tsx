@@ -36,38 +36,75 @@ function FigmaDashboardContent() {
 
   useEffect(() => {
     async function loadWorkspaceAndDepts() {
-      if (!slug) return
+      if (!slug) {
+        setWorkspace({
+          id: 'demo-workspace',
+          name: 'ACM Student Chapter',
+          slug: 'acm-student-chapter',
+        })
+        setDepartments([
+          { id: '1', name: 'Creative & Design' },
+          { id: '2', name: 'Technical & Web' },
+          { id: '3', name: 'PR & Sponsorships' },
+          { id: '4', name: 'Logistics & Ops' },
+          { id: '5', name: 'Finance & Treasury' },
+          { id: '6', name: 'Media & Research' },
+        ])
+        setLoading(false)
+        return
+      }
 
-      // Fetch Workspace
-      const { data: wsData } = await supabase
-        .from('workspaces')
-        .select('id, name, slug')
-        .eq('slug', slug)
-        .single()
+      try {
+        // Fetch Workspace
+        const { data: wsData } = await supabase
+          .from('workspaces')
+          .select('id, name, slug')
+          .eq('slug', slug)
+          .single()
 
-      if (wsData) {
-        setWorkspace(wsData)
+        if (wsData) {
+          setWorkspace(wsData)
 
-        // Fetch Real Database Departments!
-        const { data: deptsData } = await supabase
-          .from('departments')
-          .select('id, name')
-          .eq('workspace_id', wsData.id)
-          .order('created_at', { ascending: true })
+          // Fetch Real Database Departments!
+          const { data: deptsData } = await supabase
+            .from('departments')
+            .select('id, name')
+            .eq('workspace_id', wsData.id)
+            .order('created_at', { ascending: true })
 
-        if (deptsData && deptsData.length > 0) {
-          setDepartments(deptsData)
+          if (deptsData && deptsData.length > 0) {
+            setDepartments(deptsData)
+          } else {
+            // Fallback if older test workspace had no departments
+            setDepartments([
+              { id: '1', name: 'Creative & Design' },
+              { id: '2', name: 'Technical & Web' },
+              { id: '3', name: 'PR & Sponsorships' },
+              { id: '4', name: 'Logistics & Ops' },
+              { id: '5', name: 'Finance & Treasury' },
+              { id: '6', name: 'Media & Research' },
+            ])
+          }
         } else {
-          // Fallback if older test workspace had no departments
+          setWorkspace({
+            id: 'ws-fallback',
+            name: slug.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
+            slug: slug,
+          })
           setDepartments([
             { id: '1', name: 'Creative & Design' },
             { id: '2', name: 'Technical & Web' },
             { id: '3', name: 'PR & Sponsorships' },
             { id: '4', name: 'Logistics & Ops' },
+            { id: '5', name: 'Finance & Treasury' },
+            { id: '6', name: 'Media & Research' },
           ])
         }
+      } catch (err) {
+        console.error('Error loading workspace:', err)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
     loadWorkspaceAndDepts()
   }, [slug])
