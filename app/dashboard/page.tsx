@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useState, Suspense } from 'react'
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 
@@ -91,12 +92,18 @@ function FigmaDashboardContent() {
           </h1>
         </div>
         <div className="flex items-center space-x-3">
-          <button className="rounded-lg bg-zinc-900 border border-zinc-700 px-4 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors">
+          <Link
+            href={`/dashboard/recruitment${slug ? `?ws=${encodeURIComponent(slug)}` : ''}`}
+            className="rounded-lg bg-zinc-900 border border-zinc-700 px-4 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+          >
             + Invite Member
-          </button>
-          <button className="rounded-lg bg-white px-4 py-2 text-xs font-bold text-zinc-950 hover:bg-zinc-200 transition-colors shadow">
+          </Link>
+          <Link
+            href={`/dashboard/tasks${slug ? `?ws=${encodeURIComponent(slug)}` : ''}`}
+            className="rounded-lg bg-white px-4 py-2 text-xs font-bold text-zinc-950 hover:bg-zinc-200 transition-colors shadow"
+          >
             New Task
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -129,9 +136,12 @@ function FigmaDashboardContent() {
           </div>
 
           <div className="pt-2">
-            <a href="#kanban" className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors">
+            <Link
+              href={`/dashboard/tasks${slug ? `?ws=${encodeURIComponent(slug)}` : ''}`}
+              className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+            >
               View All Tasks →
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -182,8 +192,9 @@ function FigmaDashboardContent() {
             const theme = DEPARTMENT_PALETTES[idx % DEPARTMENT_PALETTES.length]
 
             return (
-              <div
+              <Link
                 key={dept.id || idx}
+                href={`/dashboard/tasks${slug ? `?ws=${encodeURIComponent(slug)}` : ''}`}
                 style={{
                   backgroundColor: theme.bg,
                   borderLeftColor: theme.side,
@@ -229,7 +240,7 @@ function FigmaDashboardContent() {
                 >
                   Enter Matrix <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
                 </div>
-              </div>
+              </Link>
             )
           })}
         </div>

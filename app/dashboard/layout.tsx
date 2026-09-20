@@ -2,39 +2,75 @@
 
 import React, { Suspense } from 'react'
 import Link from 'next/link'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { Logo } from '../../components/Logo'
 
 function IconRailContent() {
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const ws = searchParams.get('ws')
+  const queryStr = ws ? `?ws=${encodeURIComponent(ws)}` : ''
+
+  const navItems = [
+    {
+      id: 'overview',
+      label: 'Dashboard',
+      icon: '✦',
+      href: `/dashboard${queryStr}`,
+      isActive: pathname === '/dashboard',
+    },
+    {
+      id: 'tasks',
+      label: 'Tasks',
+      icon: '❖',
+      href: `/dashboard/tasks${queryStr}`,
+      isActive: pathname.startsWith('/dashboard/tasks'),
+    },
+    {
+      id: 'recruitment',
+      label: 'Recruitment',
+      icon: '◈',
+      href: `/dashboard/recruitment${queryStr}`,
+      isActive: pathname.startsWith('/dashboard/recruitment'),
+    },
+    {
+      id: 'vault',
+      label: 'Certificates',
+      icon: '▣',
+      href: `/dashboard/vault${queryStr}`,
+      isActive: pathname.startsWith('/dashboard/vault'),
+    },
+  ]
+
   return (
     <aside className="w-16 border-r border-zinc-800/80 bg-zinc-950 flex flex-col justify-between items-center py-6 shrink-0 z-10">
       {/* Top Navigation Icons */}
       <div className="flex flex-col items-center space-y-6">
         {/* Brand Icon */}
-        <Link href="/workspace" className="flex items-center justify-center text-white hover:text-zinc-300 transition-colors">
-            <Logo className="w-10 h-10" />
+        <Link
+          href="/workspace"
+          className="flex items-center justify-center text-white hover:text-zinc-300 transition-colors"
+        >
+          <Logo className="w-10 h-10" />
         </Link>
 
         <div className="h-px w-6 bg-zinc-800" />
 
-        {/* Navigation Rail (Figma Style: Active tab gets solid highlight) */}
+        {/* Navigation Rail (Figma Style: Active tab gets solid white highlight) */}
         <nav className="flex flex-col space-y-3">
-          {[
-            { id: 'overview', label: 'Dashboard', icon: '✦', active: true },
-            { id: 'kanban', label: 'Tasks', icon: '❖', active: false },
-            { id: 'recruitment', label: 'Recruitment', icon: '◈', active: false },
-            { id: 'vault', label: 'Certificates', icon: '▣', active: false },
-          ].map((item) => (
-            <button
+          {navItems.map((item) => (
+            <Link
               key={item.id}
+              href={item.href}
               title={item.label}
               className={`h-10 w-10 rounded-xl flex items-center justify-center text-lg font-bold transition-all ${
-                item.active 
-                  ? 'bg-white text-zinc-950 shadow-md scale-105' 
+                item.isActive
+                  ? 'bg-white text-zinc-950 shadow-md scale-105'
                   : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
               }`}
             >
               {item.icon}
-            </button>
+            </Link>
           ))}
         </nav>
       </div>
@@ -48,13 +84,13 @@ function IconRailContent() {
         >
           WS
         </Link>
-        <a
+        <Link
           href="/auth/signout"
           title="Sign Out"
           className="h-9 w-9 rounded-lg border border-red-900/30 bg-red-950/20 flex items-center justify-center text-xs font-bold text-red-400 hover:bg-red-900/40 hover:text-red-300 transition-colors"
         >
           ✕
-        </a>
+        </Link>
       </div>
     </aside>
   )

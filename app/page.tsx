@@ -69,6 +69,13 @@ export default function HomePage() {
 
           <div className="flex items-center gap-3">
             <Link
+              href="/dashboard"
+              className="inline-flex items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-zinc-300 transition-all hover:text-white hover:border-zinc-500"
+            >
+              Dashboard
+            </Link>
+
+            <Link
               href="/login"
               className="inline-flex items-center justify-center rounded-lg px-3.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:text-foreground"
             >
@@ -105,17 +112,17 @@ export default function HomePage() {
 
             <div className="flex flex-col gap-3 sm:flex-row">
               <Link
-                href="/signup"
-                className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-5 text-xs font-semibold text-primary-foreground shadow transition-all hover:bg-primary/90 hover:scale-[1.02] active:scale-[0.98]"
+                href="/dashboard"
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-white px-5 text-xs font-bold text-zinc-950 shadow transition-all hover:bg-zinc-200 hover:scale-[1.02] active:scale-[0.98]"
               >
-                Get started
+                Explore Dashboard →
               </Link>
 
               <Link
-                href="/login"
+                href="/signup"
                 className="inline-flex h-10 items-center justify-center rounded-lg border border-input bg-background px-5 text-xs font-semibold text-foreground shadow-sm transition-all hover:bg-accent hover:text-accent-foreground"
               >
-                Learn more
+                Get started
               </Link>
             </div>
 
