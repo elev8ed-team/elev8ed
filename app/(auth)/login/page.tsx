@@ -25,8 +25,9 @@ export default function LoginPage() {
       setErrorMessage(error.message)
       setIsLoading(false)
     } else {
-      // Directs authenticated core/members straight to their active dashboard workspace
-      window.location.href = '/dashboard'
+// Directs authenticated core/members straight to their active dashboard workspace
+
+window.location.href = '/dashboard'
     }
   }
 
@@ -38,8 +39,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // Enforces post-OAuth redirect target to hit the initialization gateway
-        redirectTo: `${window.location.origin}/onboarding`,
+        redirectTo: `${window.location.origin}/auth/callback?next=/workspace`,
       },
     })
 
@@ -81,18 +81,11 @@ export default function LoginPage() {
 
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Password
-            </label>
-
-            <Link
-              href="/forgot-password"
-              className="text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-            >
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Password</label>
+            <Link href="/forgot-password" className="text-xs font-medium text-primary hover:underline underline-offset-4">
               Forgot password?
             </Link>
           </div>
-
           <input
             type="password"
             placeholder="••••••••"
@@ -135,6 +128,16 @@ export default function LoginPage() {
         </svg>
         Sign In with Google
       </button>
+
+      {/* Bottom Navigation Link */}
+      <div className="text-center lg:text-left">
+        <p className="text-sm text-muted-foreground">
+          Don&apos;t have an account?{' '}
+          <Link href="/signup" className="font-medium text-foreground underline underline-offset-4">
+            Sign up
+          </Link>
+        </p>
+      </div>
     </div>
   )
 }

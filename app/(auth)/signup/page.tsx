@@ -35,6 +35,7 @@ function SignupForm() {
       return
     }
 
+    // Call Supabase Auth API
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -52,18 +53,44 @@ function SignupForm() {
       return
     }
 
+    // If Supabase has "Confirm Email" OFF, data.session is active immediately
     if (data.session) {
-      window.location.href = '/'
+      // If they signed up via a club invite link, route them to accept it
+      if (invitationToken) {
+        window.location.href = `/invite/accept?token=${invitationToken}`
+        return
+      }
+      // Otherwise, route them to select or create their workspace
+      window.location.href = '/workspace'
       return
     }
 
+    // Fallback: If "Confirm Email" is ever turned back ON in the future
     setSuccessMessage(
       invitationToken
-        ? 'Account created successfully. Please verify your email, then return through your invitation flow.'
-        : 'Account created successfully. Please check your email to verify your account before signing in.'
+        ? 'Account created! Please verify your email to accept your club invitation.'
+        : 'Account created! Please check your inbox (and spam folder) for a confirmation link.'
     )
 
     setIsLoading(false)
+  }
+
+  // Google OAuth Login
+  const handleGoogleLogin = async () => {
+    setIsLoading(true)
+    setErrorMessage(null)
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/workspace`,
+      },
+    })
+
+    if (error) {
+      setErrorMessage(error.message)
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -71,7 +98,7 @@ function SignupForm() {
       <div className="flex flex-col space-y-2 text-center lg:text-left">
         <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
         <p className="text-sm text-muted-foreground">
-          Set your credentials to activate your Elev8ed access
+          Set your credentials or use your institutional account to get started
         </p>
       </div>
 
@@ -93,6 +120,7 @@ function SignupForm() {
         </div>
       )}
 
+      {/* Main Credentials Form */}
       <form onSubmit={handleSignup} className="space-y-4">
         <div className="space-y-1">
           <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -163,6 +191,30 @@ function SignupForm() {
         </button>
       </form>
 
+      {/* Horizontal Visual Separator */}
+      <div className="relative flex items-center justify-center my-4">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t border-muted" />
+        </div>
+        <span className="relative bg-background px-2 text-xs uppercase text-muted-foreground tracking-wider font-semibold">
+          Or continue with
+        </span>
+      </div>
+
+      {/* OAuth Integration Actions */}
+      <button
+        type="button"
+        onClick={handleGoogleLogin}
+        disabled={isLoading}
+        className="w-full flex items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+      >
+        <svg className="h-4 w-4" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="google" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
+          <path fill="currentColor" d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"></path>
+        </svg>
+        Sign up with Google
+      </button>
+
+      {/* Bottom Navigation Link */}
       <div className="text-center lg:text-left">
         <p className="text-sm text-muted-foreground">
           Already have an account?{' '}
