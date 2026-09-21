@@ -1,202 +1,525 @@
 "use client"
 
-import React, { useState, useEffect, Suspense } from 'react'
+import React, { useState, useEffect, Suspense, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { Plus, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 
-interface Task {
+import { FilterBar, SortField, SortDirection } from './components/FilterBar'
+import { TaskCard } from './components/TaskCard'
+import { TaskModal, TaskItem, TaskStatus, TaskPriority } from './components/TaskModal'
+import { Department, Member } from './components/MemberOrgPicker'
+
+interface WorkspaceDetails {
   id: string
-  title: string
-  department: string
-  status: 'backlog' | 'in_progress' | 'review' | 'done'
-  priority: 'urgent' | 'medium' | 'low'
-  assignee: string
-  dueDate?: string
+  name: string
+  slug: string
 }
 
-const DEFAULT_TASKS: Task[] = [
-  {
-    id: 't-1',
-    title: 'Finalize auditorium bookings & sound engineer for annual fest',
-    department: 'Logistics',
-    status: 'in_progress',
-    priority: 'urgent',
-    assignee: 'Arjun K.',
-    dueDate: 'Sep 24',
-  },
-  {
-    id: 't-2',
-    title: 'Review sponsorship deck & tier deliverables with Dean of Affairs',
-    department: 'PR & Sponsor',
-    status: 'review',
-    priority: 'urgent',
-    assignee: 'Priya M.',
-    dueDate: 'Sep 26',
-  },
-  {
-    id: 't-3',
-    title: 'Deploy CertiSwift automated badge generator for workshop',
-    department: 'Technical',
-    status: 'in_progress',
-    priority: 'medium',
-    assignee: 'Dev S.',
-    dueDate: 'Sep 28',
-  },
-  {
-    id: 't-4',
-    title: 'Draft social media campaign teaser video & carousel graphics',
-    department: 'Creative & Design',
-    status: 'backlog',
-    priority: 'medium',
-    assignee: 'Sneha R.',
-    dueDate: 'Oct 02',
-  },
-  {
-    id: 't-5',
-    title: 'Procure stage badges, wristbands, and registration scanner units',
-    department: 'Logistics',
-    status: 'backlog',
-    priority: 'low',
-    assignee: 'Rohan T.',
-    dueDate: 'Oct 05',
-  },
-  {
-    id: 't-6',
-    title: 'Submit quarterly budget expense sheet & receipts to treasurer',
-    department: 'Finance',
-    status: 'done',
-    priority: 'medium',
-    assignee: 'Ananya V.',
-    dueDate: 'Sep 18',
-  },
+const COLUMNS: { id: TaskStatus; label: string; countLabel: string }[] = [
+  { id: 'todo', label: 'To Do', countLabel: 'Queue' },
+  { id: 'in_progress', label: 'In Progress', countLabel: 'Active' },
+  { id: 'done', label: 'Done', countLabel: 'Completed' },
 ]
 
-const COLUMNS: { id: Task['status']; label: string; countLabel: string }[] = [
-  { id: 'backlog', label: 'Backlog', countLabel: 'Queue' },
-  { id: 'in_progress', label: 'In Progress', countLabel: 'Active' },
-  { id: 'review', label: 'Review', countLabel: 'Audit' },
-  { id: 'done', label: 'Done', countLabel: 'Archived' },
-]
+// Priority weight mapping for sorting
+const PRIORITY_WEIGHTS: Record<TaskPriority, number> = {
+  urgent: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+}
 
 function TasksContent() {
   const searchParams = useSearchParams()
   const slug = searchParams.get('ws')
 
+  const [workspace, setWorkspace] = useState<WorkspaceDetails | null>(null)
   const [workspaceName, setWorkspaceName] = useState('Workspace Tasks')
-  const [tasks, setTasks] = useState<Task[]>(DEFAULT_TASKS)
+  const [tenureId, setTenureId] = useState<string | null>(null)
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [members, setMembers] = useState<Member[]>([])
+  const [tasks, setTasks] = useState<TaskItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  // Filters, Search, and Sorting State
+  const [searchQuery, setSearchQuery] = useState<string>('')
   const [filterDept, setFilterDept] = useState<string>('all')
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [filterAssignee, setFilterAssignee] = useState<string>('all')
+  const [sortField, setSortField] = useState<SortField>(null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
-  // Form State
-  const [newTitle, setNewTitle] = useState('')
-  const [newDept, setNewDept] = useState('Technical')
-  const [newPriority, setNewPriority] = useState<Task['priority']>('medium')
-  const [newAssignee, setNewAssignee] = useState('')
-  const [newDueDate, setNewDueDate] = useState('')
+  // Modals State
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [createColumnStatus, setCreateColumnStatus] = useState<TaskStatus>('todo')
+  const [taskToEdit, setTaskToEdit] = useState<TaskItem | null>(null)
 
+  // Smooth Card Animation & Drag-and-Drop Tracking
+  const [movingOutTaskId, setMovingOutTaskId] = useState<string | null>(null)
+  const [movingDirection, setMovingDirection] = useState<'next' | 'prev' | null>(null)
+  const [enteringTaskIds, setEnteringTaskIds] = useState<Set<string>>(new Set())
+  const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null)
+
+  // Fetch Tasks for current workspace and active tenure
+  const fetchTasks = useCallback(async (wsId: string, tId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select(`
+          id,
+          workspace_id,
+          tenure_id,
+          department_id,
+          title,
+          description,
+          status,
+          priority,
+          assigned_to,
+          created_by,
+          deadline,
+          created_at,
+          departments (
+            id,
+            name
+          ),
+          assigned_member:members!tasks_assigned_to_fkey (
+            id,
+            full_name
+          )
+        `)
+        .eq('workspace_id', wsId)
+        .eq('tenure_id', tId)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching tasks from Supabase:', error)
+      } else if (data) {
+        setTasks(data as unknown as TaskItem[])
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching tasks:', err)
+    }
+  }, [])
+
+  // 1. Initialize Workspace, Tenure, Departments, Members
   useEffect(() => {
-    async function loadWorkspace() {
-      if (!slug) return
-      const { data } = await supabase
-        .from('workspaces')
-        .select('name')
-        .eq('slug', slug)
-        .single()
-      if (data?.name) {
-        setWorkspaceName(data.name)
+    async function loadWorkspaceAndData() {
+      setLoading(true)
+      try {
+        let ws: WorkspaceDetails | null = null
+
+        if (slug) {
+          const { data } = await supabase
+            .from('workspaces')
+            .select('id, name, slug')
+            .eq('slug', slug)
+            .maybeSingle()
+          if (data) ws = data
+        }
+
+        // Fallback: If slug was omitted or not matched, pick first workspace in database
+        if (!ws) {
+          const { data: firstWs } = await supabase
+            .from('workspaces')
+            .select('id, name, slug')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+          if (firstWs) ws = firstWs
+        }
+
+        if (!ws) {
+          setWorkspaceName(slug ? slug.replace(/-/g, ' ') : 'Workspace Tasks')
+          setLoading(false)
+          return
+        }
+
+        setWorkspace(ws)
+        setWorkspaceName(ws.name)
+
+        // 2. Fetch Active Tenure
+        const { data: tenureData } = await supabase
+          .from('tenures')
+          .select('id, year_label, is_active')
+          .eq('workspace_id', ws.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        let currentTenureId = tenureData?.id
+
+        if (!currentTenureId) {
+          const { data: latestTenure } = await supabase
+            .from('tenures')
+            .select('id, year_label')
+            .eq('workspace_id', ws.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          currentTenureId = latestTenure?.id
+        }
+
+        setTenureId(currentTenureId || null)
+
+        // 3. Fetch Departments
+        const { data: deptsData } = await supabase
+          .from('departments')
+          .select('id, name')
+          .eq('workspace_id', ws.id)
+          .order('created_at', { ascending: true })
+
+        setDepartments(deptsData || [])
+
+        // 4. Fetch Members with role and department
+        const { data: membersData } = await supabase
+          .from('members')
+          .select('id, full_name, role, department_id')
+          .eq('workspace_id', ws.id)
+          .order('full_name', { ascending: true })
+
+        setMembers((membersData || []) as Member[])
+
+        // 5. Initial Tasks Fetch
+        if (currentTenureId) {
+          await fetchTasks(ws.id, currentTenureId)
+        }
+      } catch (err) {
+        console.error('Error initializing workspace tasks:', err)
+      } finally {
+        setLoading(false)
       }
     }
-    loadWorkspace()
-  }, [slug])
 
-  const handleAddTask = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newTitle.trim()) return
+    loadWorkspaceAndData()
+  }, [slug, fetchTasks])
 
-    const newTask: Task = {
-      id: `t-${Date.now()}`,
-      title: newTitle.trim(),
-      department: newDept,
-      status: 'backlog',
-      priority: newPriority,
-      assignee: newAssignee.trim() || 'Core Team',
-      dueDate: newDueDate || 'Soon',
+  // 2. Setup Realtime Subscription on Supabase tasks
+  useEffect(() => {
+    if (!workspace?.id || !tenureId) return
+
+    const channel = supabase
+      .channel(`kanban-tasks-${workspace.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tasks',
+          filter: `workspace_id=eq.${workspace.id}`,
+        },
+        () => {
+          fetchTasks(workspace.id, tenureId)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [workspace?.id, tenureId, fetchTasks])
+
+  // 3. Smooth Advance and Back Transitions (eliminates teleportation)
+  const handleMoveTask = async (taskId: string, direction: 'next' | 'prev') => {
+    const order: TaskStatus[] = ['todo', 'in_progress', 'done']
+    const targetTask = tasks.find((t) => t.id === taskId)
+    if (!targetTask) return
+
+    const currentIndex = order.indexOf(targetTask.status)
+    const nextIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1
+    if (nextIndex < 0 || nextIndex >= order.length) return
+
+    const newStatus = order[nextIndex]
+
+    // Step 1: Start exit animation on source column
+    setMovingOutTaskId(taskId)
+    setMovingDirection(direction)
+
+    // Wait 150ms for CSS exit slide
+    await new Promise((resolve) => setTimeout(resolve, 150))
+
+    // Step 2: Transition state (using View Transitions if supported)
+    const applyStateChange = () => {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
+      )
+      setMovingOutTaskId(null)
+      setMovingDirection(null)
+      setEnteringTaskIds((prev) => new Set(prev).add(taskId))
     }
 
-    setTasks([newTask, ...tasks])
-    setNewTitle('')
-    setNewAssignee('')
-    setNewDueDate('')
-    setIsModalOpen(false)
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      ;(document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(applyStateChange)
+    } else {
+      applyStateChange()
+    }
+
+    setTimeout(() => {
+      setEnteringTaskIds((prev) => {
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
+      })
+    }, 350)
+
+    // Step 3: Mutate Supabase
+    const { error } = await supabase
+      .from('tasks')
+      .update({ status: newStatus })
+      .eq('id', taskId)
+
+    if (error) {
+      console.error('Error updating task status:', error)
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: targetTask.status } : t))
+      )
+      alert(`Failed to update task: ${error.message}`)
+    }
   }
 
-  const moveTask = (taskId: string, direction: 'next' | 'prev') => {
-    const order: Task['status'][] = ['backlog', 'in_progress', 'review', 'done']
-    setTasks(
-      tasks.map((task) => {
-        if (task.id !== taskId) return task
-        const currentIndex = order.indexOf(task.status)
-        const nextIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1
-        if (nextIndex >= 0 && nextIndex < order.length) {
-          return { ...task, status: order[nextIndex] }
-        }
-        return task
+  // 4. Drag-and-Drop Handler
+  const handleDropTask = async (taskId: string, targetStatus: TaskStatus) => {
+    const targetTask = tasks.find((t) => t.id === taskId)
+    if (!targetTask || targetTask.status === targetStatus) return
+
+    const applyDrop = () => {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: targetStatus } : t))
+      )
+      setEnteringTaskIds((prev) => new Set(prev).add(taskId))
+    }
+
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      ;(document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(applyDrop)
+    } else {
+      applyDrop()
+    }
+
+    setTimeout(() => {
+      setEnteringTaskIds((prev) => {
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
       })
+    }, 350)
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({ status: targetStatus })
+      .eq('id', taskId)
+
+    if (error) {
+      console.error('Error dropping task into column:', error)
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: targetTask.status } : t))
+      )
+      alert(`Failed to update task: ${error.message}`)
+    }
+  }
+
+  // 5. Sort Toggles Handler
+  const handleToggleSort = (field: 'priority' | 'deadline') => {
+    if (sortField !== field) {
+      setSortField(field)
+      // Due Date defaults to 'asc' (Soonest / Closest deadlines first!)
+      // Priority defaults to 'desc' (Urgent -> High -> Medium -> Low)
+      setSortDirection(field === 'deadline' ? 'asc' : 'desc')
+    } else {
+      if (field === 'deadline') {
+        if (sortDirection === 'asc') {
+          setSortDirection('desc')
+        } else {
+          setSortField(null)
+        }
+      } else {
+        if (sortDirection === 'desc') {
+          setSortDirection('asc')
+        } else {
+          setSortField(null)
+        }
+      }
+    }
+  }
+
+  const handleResetFilters = () => {
+    setSearchQuery('')
+    setFilterDept('all')
+    setFilterAssignee('all')
+    setSortField(null)
+    setSortDirection('desc')
+  }
+
+  // 6. Filter, Search, and Sort Tasks
+  const filteredAndSortedTasks = useMemo(() => {
+    let result = [...tasks]
+
+    // Search query filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          (t.description && t.description.toLowerCase().includes(q))
+      )
+    }
+
+    // Filter by Department
+    if (filterDept !== 'all') {
+      result = result.filter((t) => t.department_id === filterDept)
+    }
+
+    // Filter by Assignee
+    if (filterAssignee === 'unassigned') {
+      result = result.filter((t) => t.assigned_to === null)
+    } else if (filterAssignee !== 'all') {
+      result = result.filter((t) => t.assigned_to === filterAssignee)
+    }
+
+    // Sort
+    if (sortField === 'priority') {
+      result.sort((a, b) => {
+        const weightA = PRIORITY_WEIGHTS[a.priority] || 0
+        const weightB = PRIORITY_WEIGHTS[b.priority] || 0
+        return sortDirection === 'desc' ? weightB - weightA : weightA - weightB
+      })
+    } else if (sortField === 'deadline') {
+      result.sort((a, b) => {
+        if (!a.deadline && !b.deadline) return 0
+        if (!a.deadline) return 1
+        if (!b.deadline) return -1
+        const timeA = new Date(a.deadline).getTime()
+        const timeB = new Date(b.deadline).getTime()
+        return sortDirection === 'asc' ? timeA - timeB : timeB - timeA
+      })
+    }
+
+    return result
+  }, [tasks, searchQuery, filterDept, filterAssignee, sortField, sortDirection])
+
+  // Overall Velocity / Completion Progress Metric
+  const totalTasksCount = tasks.length
+  const completedTasksCount = tasks.filter((t) => t.status === 'done').length
+  const completionPercent =
+    totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto p-12 text-sm font-mono text-zinc-500">
+        Loading operational Kanban pipeline...
+      </div>
     )
   }
 
-  const departments = ['all', ...Array.from(new Set(tasks.map((t) => t.department)))]
-
-  const filteredTasks =
-    filterDept === 'all' ? tasks : tasks.filter((t) => t.department === filterDept)
-
   return (
-    <div className="max-w-7xl mx-auto space-y-8 pb-12">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-zinc-800/80 pb-6 gap-4">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400 bg-zinc-900 border border-zinc-800 px-2.5 py-0.5 rounded">
-              Kanban Pipeline
-            </span>
+    <div className="max-w-7xl mx-auto space-y-6 pb-12">
+      {/* Header Section */}
+      <div className="border-b border-zinc-800/80 pb-5 space-y-4">
+        {/* Top Row: Workspace Heading, Velocity Meter & "+ New Task" Button */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400 bg-zinc-900 border border-zinc-800 px-2.5 py-0.5 rounded">
+                Kanban Pipeline
+              </span>
+              <span className="text-[11px] font-mono text-zinc-500">
+                Live Sync
+              </span>
+            </div>
+            <h1 className="text-3xl font-black tracking-tight text-white">
+              {workspaceName}
+            </h1>
           </div>
-          <h1 className="text-3xl font-black tracking-tight text-white mt-2">
-            {workspaceName}
-          </h1>
+
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {/* Operational Velocity / Completion Progress Bar */}
+            {totalTasksCount > 0 && (
+              <div className="flex items-center gap-3 bg-zinc-900/90 border border-zinc-800 rounded-xl px-3.5 py-2 shadow-sm">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-3 text-[10px] font-mono">
+                    <span className="text-zinc-400 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3 text-emerald-400" /> Velocity
+                    </span>
+                    <span className="text-zinc-200 font-bold">
+                      {completedTasksCount} / {totalTasksCount} ({completionPercent}%)
+                    </span>
+                  </div>
+                  <div className="w-28 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                      style={{ width: `${completionPercent}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setCreateColumnStatus('todo')
+                setIsCreateOpen(true)
+              }}
+              className="flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-zinc-950 hover:bg-zinc-200 transition-all shadow-md cursor-pointer hover:scale-[1.02]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>New Task</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          {/* Department Filter Selector */}
-          <select
-            value={filterDept}
-            onChange={(e) => setFilterDept(e.target.value)}
-            className="rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-zinc-600"
-          >
-            {departments.map((dept) => (
-              <option key={dept} value={dept} className="bg-zinc-900 text-white">
-                {dept === 'all' ? 'All Departments' : dept}
-              </option>
-            ))}
-          </select>
-
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="rounded-lg bg-white px-4 py-2 text-xs font-bold text-zinc-950 hover:bg-zinc-200 transition-colors shadow cursor-pointer"
-          >
-            + New Task
-          </button>
-        </div>
+        {/* Unified Filter Bar directly below the Heading (Left-Aligned) */}
+        <FilterBar
+          departments={departments}
+          members={members}
+          selectedDepartment={filterDept}
+          onDepartmentChange={setFilterDept}
+          selectedAssignee={filterAssignee}
+          onAssigneeChange={setFilterAssignee}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          onToggleSort={handleToggleSort}
+          onResetFilters={handleResetFilters}
+          totalTasksCount={tasks.length}
+          filteredTasksCount={filteredAndSortedTasks.length}
+        />
       </div>
 
-      {/* Kanban 4-Column Board */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Kanban 3-Column Board with HTML5 Drag-and-Drop and Quick Add */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {COLUMNS.map((col) => {
-          const colTasks = filteredTasks.filter((t) => t.status === col.id)
+          const colTasks = filteredAndSortedTasks.filter((t) => t.status === col.id)
+          const isOverThisCol = dragOverColumn === col.id
 
           return (
             <div
               key={col.id}
-              className="flex flex-col rounded-2xl border border-zinc-800/80 bg-zinc-900/30 p-4 space-y-4 min-h-[500px]"
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+                if (dragOverColumn !== col.id) {
+                  setDragOverColumn(col.id)
+                }
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setDragOverColumn(null)
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragOverColumn(null)
+                const taskId = e.dataTransfer.getData('text/plain')
+                if (taskId) {
+                  handleDropTask(taskId, col.id)
+                }
+              }}
+              className={`flex flex-col rounded-2xl border p-4 space-y-4 min-h-[550px] transition-all duration-150 ${
+                isOverThisCol
+                  ? 'border-zinc-500 bg-zinc-800/40 ring-1 ring-zinc-500/50 shadow-lg'
+                  : 'border-zinc-800/80 bg-zinc-900/30'
+              }`}
             >
               {/* Column Header */}
               <div className="flex items-center justify-between border-b border-zinc-800/60 pb-3">
@@ -204,68 +527,59 @@ function TasksContent() {
                   <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-300">
                     {col.label}
                   </h2>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
                     {colTasks.length}
                   </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase">
+                    {col.countLabel}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreateColumnStatus(col.id)
+                      setIsCreateOpen(true)
+                    }}
+                    className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                    title={`Add task to ${col.label}`}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
 
               {/* Tasks List */}
-              <div className="space-y-3 flex-1 overflow-y-auto">
+              <div className="space-y-3 flex-1 overflow-y-auto pr-0.5">
                 {colTasks.map((task) => (
-                  <div
+                  <TaskCard
                     key={task.id}
-                    className="group rounded-xl border border-zinc-800/80 bg-zinc-900/80 p-4 space-y-3 hover:border-zinc-700 transition-all shadow-sm"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-400">
-                        {task.department}
-                      </span>
-                      <span
-                        className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded font-bold ${
-                          task.priority === 'urgent'
-                            ? 'bg-red-950/60 text-red-400 border border-red-800/40'
-                            : task.priority === 'medium'
-                            ? 'bg-amber-950/60 text-amber-400 border border-amber-800/40'
-                            : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
-                        }`}
-                      >
-                        {task.priority}
-                      </span>
-                    </div>
-
-                    <p className="text-xs font-semibold text-zinc-200 line-clamp-2">
-                      {task.title}
-                    </p>
-
-                    <div className="flex items-center justify-between pt-1 text-[11px] font-mono text-zinc-500 border-t border-zinc-800/40">
-                      <span>👤 {task.assignee}</span>
-                      {task.dueDate && <span>⏱ {task.dueDate}</span>}
-                    </div>
-
-                    {/* Step Movement Actions */}
-                    <div className="flex items-center justify-between pt-1">
-                      <button
-                        onClick={() => moveTask(task.id, 'prev')}
-                        disabled={col.id === 'backlog'}
-                        className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 disabled:opacity-20 cursor-pointer"
-                      >
-                        ← Back
-                      </button>
-                      <button
-                        onClick={() => moveTask(task.id, 'next')}
-                        disabled={col.id === 'done'}
-                        className="text-[10px] font-mono font-bold text-zinc-400 hover:text-white disabled:opacity-20 cursor-pointer"
-                      >
-                        Advance →
-                      </button>
-                    </div>
-                  </div>
+                    task={task}
+                    departments={departments}
+                    currentColumnId={col.id}
+                    onMoveTask={handleMoveTask}
+                    onEditTask={(t) => setTaskToEdit(t)}
+                    isMovingOut={movingOutTaskId === task.id ? movingDirection : null}
+                    isEntering={enteringTaskIds.has(task.id)}
+                  />
                 ))}
 
                 {colTasks.length === 0 && (
-                  <div className="h-32 flex items-center justify-center border border-dashed border-zinc-800/60 rounded-xl text-[11px] font-mono text-zinc-600">
-                    No tasks in {col.label.toLowerCase()}
+                  <div className="h-36 flex flex-col items-center justify-center border border-dashed border-zinc-800/60 rounded-xl text-center p-4 space-y-2.5">
+                    <span className="text-[11px] font-mono text-zinc-500">
+                      No tasks in {col.label.toLowerCase()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateColumnStatus(col.id)
+                        setIsCreateOpen(true)
+                      }}
+                      className="text-[11px] font-mono text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700 bg-zinc-900/80 px-3 py-1 rounded-lg transition-colors cursor-pointer"
+                    >
+                      + Add to {col.label}
+                    </button>
                   </div>
                 )}
               </div>
@@ -274,117 +588,34 @@ function TasksContent() {
         })}
       </div>
 
-      {/* New Task Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-6 space-y-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-200 font-mono">
-                Create Operational Task
-              </h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-zinc-400 hover:text-white text-sm"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleAddTask} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-[11px] font-mono uppercase text-zinc-400">
-                  Task Title
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Confirm sponsorship contract"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  required
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-mono uppercase text-zinc-400">
-                    Department
-                  </label>
-                  <select
-                    value={newDept}
-                    onChange={(e) => setNewDept(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-600"
-                  >
-                    <option value="Logistics">Logistics</option>
-                    <option value="Technical">Technical</option>
-                    <option value="PR & Sponsor">PR & Sponsor</option>
-                    <option value="Creative & Design">Creative & Design</option>
-                    <option value="Finance">Finance</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-mono uppercase text-zinc-400">
-                    Priority
-                  </label>
-                  <select
-                    value={newPriority}
-                    onChange={(e) => setNewPriority(e.target.value as Task['priority'])}
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-600"
-                  >
-                    <option value="urgent">Urgent</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-mono uppercase text-zinc-400">
-                    Assignee
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Arjun K."
-                    value={newAssignee}
-                    onChange={(e) => setNewAssignee(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-mono uppercase text-zinc-400">
-                    Due Date
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Oct 05"
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-white px-4 py-1.5 text-xs font-bold text-zinc-950 hover:bg-zinc-200"
-                >
-                  Create Task
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Unified Task Modal for Creating or Editing/Deleting Tasks */}
+      {(isCreateOpen || Boolean(taskToEdit)) && (
+        <TaskModal
+          key={taskToEdit ? `edit-${taskToEdit.id}` : `create-${createColumnStatus}`}
+          isOpen={isCreateOpen || Boolean(taskToEdit)}
+          onClose={() => {
+            setIsCreateOpen(false)
+            setTaskToEdit(null)
+          }}
+          taskToEdit={taskToEdit}
+          initialStatus={createColumnStatus}
+          workspaceId={workspace?.id || ''}
+          tenureId={tenureId || ''}
+          departments={departments}
+          members={members}
+          onTaskSaved={(savedTask) => {
+            setTasks((prev) => {
+              const exists = prev.some((t) => t.id === savedTask.id)
+              if (exists) {
+                return prev.map((t) => (t.id === savedTask.id ? savedTask : t))
+              }
+              return [savedTask, ...prev]
+            })
+          }}
+          onTaskDeleted={(deletedId) => {
+            setTasks((prev) => prev.filter((t) => t.id !== deletedId))
+          }}
+        />
       )}
     </div>
   )
@@ -394,7 +625,9 @@ export default function TasksPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-8 text-sm font-mono text-zinc-500">Loading Kanban pipeline...</div>
+        <div className="p-8 text-sm font-mono text-zinc-500">
+          Loading Kanban pipeline...
+        </div>
       }
     >
       <TasksContent />
