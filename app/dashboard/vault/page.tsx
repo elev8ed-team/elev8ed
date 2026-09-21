@@ -191,7 +191,7 @@ function VaultContent() {
 
               <div className="text-right space-y-0.5">
                 <div className="text-zinc-400 font-bold">SHA-256 VERIFIED</div>
-                <div className="text-zinc-600">ID: E8-{Date.now().toString(36).toUpperCase()}</div>
+                <div className="text-zinc-600">ID: E8-CERT-2026-9F8A</div>
               </div>
             </div>
           </div>
